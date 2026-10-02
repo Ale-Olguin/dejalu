@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       scheme:
-        description: "Esquema de Xcode a compilar (mirá el paso 'Discover' si falla)"
+        description: "Esquema de Xcode a compilar"
         default: "DejaLu"
         required: true
 
@@ -25,18 +25,15 @@ jobs:
           node-version: "20"
       - run: npm install -g uglify-js clean-css-cli
 
-      - name: Discover (info para depurar)
+      - name: Info de HockeySDK (para depurar)
+        continue-on-error: true
         run: |
-          xcodebuild -version
-          uname -m
-          echo "--- estructura ---"
-          ls -la
-          echo "--- scripts ---"
-          ls -la scripts || true
-          echo "--- third-party ---"
-          ls -la third-party || true
-          echo "--- esquemas/targets ---"
-          xcodebuild -list -project dejalu.xcodeproj || true
+          echo "--- usos de Hockey en Sources ---"
+          grep -rn "Hockey\|BITHockey" Sources | head -40 || true
+          echo "--- arquitecturas de libCrashReporter ---"
+          lipo -info third-party/HockeySDK-Mac/Vendor/CrashReporter/libCrashReporter-MacOSX-Static.a || true
+          echo "--- feature config ---"
+          grep -rn "HOCKEYSDK_FEATURE_CRASH_REPORTER" third-party/HockeySDK-Mac --include=*.h | head -20 || true
 
       - name: Compilar para arm64
         run: |
@@ -52,6 +49,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            GCC_PREPROCESSOR_DEFINITIONS='$(inherited) HOCKEYSDK_FEATURE_CRASH_REPORTER=0' \
             build 2>&1 | tee xcodebuild.log
 
       - name: Firma ad hoc (necesaria para correr en Apple Silicon)
