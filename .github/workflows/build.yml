@@ -1,0 +1,76 @@
+name: Build DejaLu (Apple Silicon)
+
+on:
+  workflow_dispatch:
+    inputs:
+      scheme:
+        description: "Esquema de Xcode a compilar (mirá el paso 'Discover' si falla)"
+        default: "dejalu"
+        required: true
+
+jobs:
+  build:
+    runs-on: macos-14   # runner arm64 (Apple Silicon) con Xcode preinstalado
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout con submódulos
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Node + dependencias de build
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g uglify-js clean-css-cli
+
+      - name: Discover (info para depurar)
+        run: |
+          xcodebuild -version
+          uname -m
+          echo "--- estructura ---"
+          ls -la
+          echo "--- scripts ---"
+          ls -la scripts || true
+          echo "--- third-party ---"
+          ls -la third-party || true
+          echo "--- esquemas/targets ---"
+          xcodebuild -list -project dejalu.xcodeproj || true
+
+      - name: Compilar para arm64
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project dejalu.xcodeproj \
+            -scheme "${{ github.event.inputs.scheme }}" \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee xcodebuild.log
+
+      - name: Firma ad hoc (necesaria para correr en Apple Silicon)
+        run: |
+          APP=$(find build/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
+          echo "App: $APP"
+          codesign --force --deep --sign - "$APP"
+          lipo -archs "$APP/Contents/MacOS/"* || true
+          ditto -c -k --keepParent "$APP" DejaLu-arm64.zip
+
+      - name: Subir resultado
+        uses: actions/upload-artifact@v4
+        with:
+          name: DejaLu-arm64
+          path: DejaLu-arm64.zip
+
+      - name: Subir log (siempre)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
