@@ -5,7 +5,7 @@ on:
     inputs:
       scheme:
         description: "Esquema de Xcode a compilar (mirá el paso 'Discover' si falla)"
-        default: "dejalu"
+        default: "DejaLu"
         required: true
 
 jobs:
