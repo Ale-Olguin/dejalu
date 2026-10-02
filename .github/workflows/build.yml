@@ -25,15 +25,37 @@ jobs:
           node-version: "20"
       - run: npm install -g uglify-js clean-css-cli
 
-      - name: Info de HockeySDK (para depurar)
-        continue-on-error: true
+      - name: Parchar HockeySDK (sin crash reporter, que es solo Intel)
         run: |
-          echo "--- usos de Hockey en Sources ---"
-          grep -rn "Hockey\|BITHockey" Sources | head -40 || true
-          echo "--- arquitecturas de libCrashReporter ---"
-          lipo -info third-party/HockeySDK-Mac/Vendor/CrashReporter/libCrashReporter-MacOSX-Static.a || true
-          echo "--- feature config ---"
-          grep -rn "HOCKEYSDK_FEATURE_CRASH_REPORTER" third-party/HockeySDK-Mac --include=*.h | head -20 || true
+          # 1) Reemplazar la librería solo-Intel por un stub arm64+x86_64 con las 3 clases
+          #    que BITCrashManager necesita para enlazar. No se usan en runtime (ver paso 2).
+          LIB=third-party/HockeySDK-Mac/Vendor/CrashReporter/libCrashReporter-MacOSX-Static.a
+          mkdir -p /tmp/stub && cd /tmp/stub
+          cat > stub.m << 'STUB'
+          #import <Foundation/Foundation.h>
+          @interface BITPLCrashReport : NSObject
+          @end
+          @implementation BITPLCrashReport
+          @end
+          @interface BITPLCrashReporter : NSObject
+          @end
+          @implementation BITPLCrashReporter
+          @end
+          @interface BITPLCrashReporterConfig : NSObject
+          @end
+          @implementation BITPLCrashReporterConfig
+          @end
+          STUB
+          clang -arch arm64 -arch x86_64 -c stub.m -o stub.o
+          cd "$GITHUB_WORKSPACE"
+          libtool -static -o "$LIB" /tmp/stub/stub.o
+          lipo -info "$LIB"
+
+          # 2) Quitar de la app las llamadas a HockeyApp (servicio discontinuado)
+          F=Sources/UI/application/DJLAppDelegate.mm
+          sed -i '' '/BITHockeyManager sharedHockeyManager\]/d' "$F"
+          echo "--- líneas de Hockey que quedan en $F ---"
+          grep -n "Hockey" "$F" || true
 
       - name: Compilar para arm64
         run: |
@@ -49,7 +71,6 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            GCC_PREPROCESSOR_DEFINITIONS='$(inherited) HOCKEYSDK_FEATURE_CRASH_REPORTER=0' \
             build 2>&1 | tee xcodebuild.log
 
       - name: Firma ad hoc (necesaria para correr en Apple Silicon)
